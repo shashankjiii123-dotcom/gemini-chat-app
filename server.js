@@ -17,19 +17,18 @@ if (fs.existsSync(publicDir)) {
 }
 app.use(express.static(__dirname));
 
-// कोर परमानेंट मेमोरी
 const CORE_USER_CONTEXT = `
-User Profile & Ground Truth:
+User Profile:
 - Name: Shashank Chaudhary (शशांक)
-- Primary Aspirations: PCS/Civil Services exam preparation, full-stack application development & freelancing, and extreme personal discipline & routine.
-- Rule: Always recognize Shashank as the master/creator of this OS. Never ask who he is or forget his name.
+- Core Pillars: PCS preparation, full-stack dev/freelance, life discipline.
+- Rule: You know Shashank directly. Be instant, concise, crisp, and conversational.
 `;
 
 const SYSTEM_PROMPTS = {
-  general: `${CORE_USER_CONTEXT}\nRole: You are Shashank's Personal AI OS companion. You are sharp, proactive, and assist him across all daily tasks.`,
-  pcs: `${CORE_USER_CONTEXT}\nRole: You are Shashank's elite PCS/Civil Services Mentor. Specialize in GS syllabus, static GK, answer writing frameworks, and exam strategy.`,
-  freelance: `${CORE_USER_CONTEXT}\nRole: You are Shashank's senior freelance engineering partner. Assist in Flutter, Node.js, code architecture, and client deliverables.`,
-  life: `${CORE_USER_CONTEXT}\nRole: You are Shashank's discipline coach. Monitor daily habits, morning physical routines, deep work study blocks, and mental clarity.`
+  general: `${CORE_USER_CONTEXT}\nRole: High-speed Personal AI OS. Respond quickly and helpfully.`,
+  pcs: `${CORE_USER_CONTEXT}\nRole: Elite PCS Mentor. Deliver sharp, factual, syllabus-oriented answers.`,
+  freelance: `${CORE_USER_CONTEXT}\nRole: Full-stack engineer & freelance architect. Crisp code and direct fixes.`,
+  life: `${CORE_USER_CONTEXT}\nRole: High-performance life & habit coach. Direct, actionable guidance.`
 };
 
 app.get('/', (req, res) => {
@@ -39,8 +38,6 @@ app.get('/', (req, res) => {
   if (fs.existsSync(fileInRoot)) return res.sendFile(fileInRoot);
   res.send('<h2>App is running</h2>');
 });
-
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 app.post('/api/chat', async (req, res) => {
   const { message, mode, history } = req.body;
@@ -58,7 +55,7 @@ app.post('/api/chat', async (req, res) => {
   let formattedContents = [];
   if (Array.isArray(history)) {
     formattedContents = history
-      .filter(item => item && item.text && !item.text.startsWith('Server busy') && !item.text.startsWith('Memory/Orchestrator') && !item.text.startsWith('Google API Error'))
+      .filter(item => item && item.text && !item.text.startsWith('Server busy') && !item.text.startsWith('Error'))
       .map(item => ({
         role: item.sender === 'user' ? 'user' : 'model',
         parts: [{ text: item.text }]
@@ -70,53 +67,59 @@ app.post('/api/chat', async (req, res) => {
     parts: [{ text: message }]
   });
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
-  let success = false;
-  let lastErrorMessage = '';
+  try {
+    // SSE Real-time Streaming Endpoint
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?alt=sse&key=${apiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents: formattedContents
+      })
+    });
 
-  // 3 रिट्राई अटेम्प्ट्स अगर गूगल सर्वर पर अचानक 503 लोड स्पाइक आए
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: systemInstruction }]
-          },
-          contents: formattedContents
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
-        res.write(`data: ${JSON.stringify({ text: reply })}\n\n`);
-        res.write('data: [DONE]\n\n');
-        res.end();
-        success = true;
-        break;
-      } else {
-        lastErrorMessage = data.error?.message || response.statusText;
-        if (response.status === 503 || response.status === 429) {
-          await sleep(1000 * attempt); // 1s, फिर 2s रुककर रिट्राई
-          continue;
-        }
-        break;
-      }
-    } catch (err) {
-      lastErrorMessage = err.message;
-      await sleep(1000);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      res.write(`data: ${JSON.stringify({ error: err.error?.message || response.statusText })}\n\n`);
+      return res.end();
     }
-  }
 
-  if (!success) {
-    res.write(`data: ${JSON.stringify({ error: `Server busy (${lastErrorMessage}). Please retry.` })}\n\n`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // बचा हुआ अधूरा टुकड़ा
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.substring(6).trim();
+          if (!jsonStr) continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const chunkText = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (chunkText) {
+              res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
+            }
+          } catch (e) {}
+        }
+      }
+    }
+
+    res.write('data: [DONE]\n\n');
+    res.end();
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ error: `Connection issue: ${err.message}` })}\n\n`);
     res.end();
   }
 });
 
 app.listen(port, () => {
-  console.log(`AI Orchestrator running on port ${port}`);
+  console.log(`Live Ultra-Fast Streaming Orchestrator running on port ${port}`);
 });
