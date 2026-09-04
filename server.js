@@ -12,7 +12,6 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// index.html चाहे public फ़ोल्डर में हो या बाहर root पर, दोनों जगह से ढूँढ कर लोड करेगा
 const publicDir = path.join(__dirname, 'public');
 if (fs.existsSync(publicDir)) {
   app.use(express.static(publicDir));
@@ -21,7 +20,6 @@ app.use(express.static(__dirname));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-// होमपेज (/) पर सीधे index.html सर्व करने का सीधा रास्ता
 app.get('/', (req, res) => {
   const fileInPublic = path.join(__dirname, 'public', 'index.html');
   if (fs.existsSync(fileInPublic)) {
@@ -31,10 +29,9 @@ app.get('/', (req, res) => {
   if (fs.existsSync(fileInRoot)) {
     return res.sendFile(fileInRoot);
   }
-  res.send('<h2>Server is running! Lekin index.html nahi mili. GitHub me check karein index.html hai ya nahi.</h2>');
+  res.send('<h2>Server is running! Lekin index.html nahi mili.</h2>');
 });
 
-// Chat API Route
 app.post('/api/chat', async (req, res) => {
   const { message } = req.body;
   if (!message) return res.status(400).json({ error: 'Message is required' });
@@ -44,7 +41,7 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
     const result = await model.generateContentStream(message);
 
     for await (const chunk of result.stream) {
