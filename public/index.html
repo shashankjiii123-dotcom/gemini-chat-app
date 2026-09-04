@@ -54,7 +54,7 @@
         <span class="status-dot"></span> Personal AI OS
       </div>
       <div class="actions">
-        <button class="clear-btn" onclick="clearCurrentChat()">Clear Chat</button>
+        <button class="clear-btn" onclick="clearCurrentChat()">Clear Memory</button>
       </div>
     </div>
     <div class="mode-selector">
@@ -87,34 +87,33 @@
       life: "Life & Discipline मोड ऑन है। आज का रूटीन, गोल या टाइम-ब्लॉक सेट करें।"
     };
 
-    function loadChatHistory() {
-      chatContainer.innerHTML = '';
+    function getHistory() {
       const saved = localStorage.getItem(`chat_history_${currentMode}`);
       if (saved) {
-        try {
-          const messages = JSON.parse(saved);
-          messages.forEach(m => appendMessage(m.text, m.sender, false));
-        } catch (e) {
-          appendMessage(DEFAULT_GREETINGS[currentMode], 'ai', false);
-        }
+        try { return JSON.parse(saved); } catch (e) { return []; }
+      }
+      return [];
+    }
+
+    function loadChatHistory() {
+      chatContainer.innerHTML = '';
+      const history = getHistory();
+      if (history.length > 0) {
+        history.forEach(m => appendMessage(m.text, m.sender, false));
       } else {
-        appendMessage(DEFAULT_GREETINGS[currentMode], 'ai', true);
+        appendMessage(DEFAULT_GREETINGS[currentMode], 'ai', false);
       }
       chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
     function saveMessageToVault(text, sender) {
-      let history = [];
-      const saved = localStorage.getItem(`chat_history_${currentMode}`);
-      if (saved) {
-        try { history = JSON.parse(saved); } catch (e) {}
-      }
+      let history = getHistory();
       history.push({ text, sender, time: new Date().toISOString() });
       localStorage.setItem(`chat_history_${currentMode}`, JSON.stringify(history));
     }
 
     function clearCurrentChat() {
-      if (confirm(`क्या आप ${currentMode.toUpperCase()} मोड की चैट हिस्ट्री मिटाना चाहते हैं?`)) {
+      if (confirm(`क्या आप ${currentMode.toUpperCase()} मोड की पूरी मेमोरी मिटाना चाहते हैं?`)) {
         localStorage.removeItem(`chat_history_${currentMode}`);
         loadChatHistory();
       }
@@ -143,6 +142,9 @@
       const text = userInput.value.trim();
       if (!text) return;
 
+      // भेजने से पहले की पूरी हिस्ट्री ले लें ताकि बैकएंड को भेजा जा सके
+      const previousHistory = getHistory();
+
       appendMessage(text, 'user', true);
       userInput.value = '';
       sendBtn.disabled = true;
@@ -153,7 +155,11 @@
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, mode: currentMode })
+          body: JSON.stringify({ 
+            message: text, 
+            mode: currentMode,
+            history: previousHistory 
+          })
         });
 
         const reader = response.body.getReader();
@@ -197,7 +203,6 @@
       }
     }
 
-    // शुरुआती लोड
     loadChatHistory();
   </script>
 </body>
