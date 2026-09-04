@@ -17,12 +17,12 @@ if (fs.existsSync(publicDir)) {
 }
 app.use(express.static(__dirname));
 
-// परमानेंट कोर मेमोरी: चैट क्लियर करने पर भी यह कभी नहीं भूलेगा
+// कोर परमानेंट मेमोरी
 const CORE_USER_CONTEXT = `
 User Profile & Ground Truth:
 - Name: Shashank Chaudhary (शशांक)
 - Primary Aspirations: PCS/Civil Services exam preparation, full-stack application development & freelancing, and extreme personal discipline & routine.
-- Rule: Always recognize Shashank as the master/creator of this OS. Never ask who he is or forget his name. Speak naturally, respectfully, and proactively.
+- Rule: Always recognize Shashank as the master/creator of this OS. Never ask who he is or forget his name.
 `;
 
 const SYSTEM_PROMPTS = {
@@ -70,54 +70,45 @@ app.post('/api/chat', async (req, res) => {
     parts: [{ text: message }]
   });
 
-  const candidateModels = [
-    'gemini-3.6-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-2.0-flash',
-    'gemini-1.5-pro'
-  ];
-
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
   let success = false;
   let lastErrorMessage = '';
 
-  for (const model of candidateModels) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            systemInstruction: {
-              parts: [{ text: systemInstruction }]
-            },
-            contents: formattedContents
-          })
-        });
+  // 3 रिट्राई अटेम्प्ट्स अगर गूगल सर्वर पर अचानक 503 लोड स्पाइक आए
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: systemInstruction }]
+          },
+          contents: formattedContents
+        })
+      });
 
-        const data = await response.json();
+      const data = await response.json();
 
-        if (response.ok) {
-          const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
-          res.write(`data: ${JSON.stringify({ text: reply })}\n\n`);
-          res.write('data: [DONE]\n\n');
-          res.end();
-          success = true;
-          break;
-        } else {
-          lastErrorMessage = data.error?.message || response.statusText;
-          if (response.status === 503 || response.status === 429) {
-            await sleep(700);
-            continue;
-          }
-          break;
+      if (response.ok) {
+        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
+        res.write(`data: ${JSON.stringify({ text: reply })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        success = true;
+        break;
+      } else {
+        lastErrorMessage = data.error?.message || response.statusText;
+        if (response.status === 503 || response.status === 429) {
+          await sleep(1000 * attempt); // 1s, फिर 2s रुककर रिट्राई
+          continue;
         }
-      } catch (err) {
-        lastErrorMessage = err.message;
-        await sleep(500);
+        break;
       }
+    } catch (err) {
+      lastErrorMessage = err.message;
+      await sleep(1000);
     }
-    if (success) break;
   }
 
   if (!success) {
@@ -127,5 +118,5 @@ app.post('/api/chat', async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`AI Orchestrator with Permanent Core Memory running on port ${port}`);
+  console.log(`AI Orchestrator running on port ${port}`);
 });
