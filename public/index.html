@@ -17,7 +17,6 @@
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     
-    /* 100dvh मोबाइल कीबोर्ड और बॉटम बार के हिसाब से खुद एडजस्ट होता है */
     body { 
       background-color: var(--bg); 
       color: var(--text); 
@@ -61,7 +60,6 @@
     .msg.ai { align-self: flex-start; background: var(--ai-msg); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
     .msg.error { background: #7f1d1d; color: #fecaca; border: 1px solid #991b1b; }
 
-    /* Footer को हमेशा स्क्रीन पर फिक्स और विज़िबल रखने के लिए */
     footer { 
       padding: 10px 14px; 
       background: #111827; 
@@ -140,7 +138,10 @@
     function getHistory() {
       const saved = localStorage.getItem(`chat_history_${currentMode}`);
       if (saved) {
-        try { return JSON.parse(saved); } catch (e) { return []; }
+        try {
+          const list = JSON.parse(saved);
+          return list.filter(item => !item.isError);
+        } catch (e) { return []; }
       }
       return [];
     }
@@ -149,21 +150,22 @@
       chatContainer.innerHTML = '';
       const history = getHistory();
       if (history.length > 0) {
-        history.forEach(m => appendMessage(m.text, m.sender, false));
+        history.forEach(m => appendMessage(m.text, m.sender, false, m.isError));
       } else {
         appendMessage(DEFAULT_GREETINGS[currentMode], 'ai', false);
       }
       chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
-    function saveMessageToVault(text, sender) {
+    function saveMessageToVault(text, sender, isError = false) {
+      if (isError) return; // एरर को मेमोरी में सेव नहीं करेंगे
       let history = getHistory();
-      history.push({ text, sender, time: new Date().toISOString() });
+      history.push({ text, sender, isError, time: new Date().toISOString() });
       localStorage.setItem(`chat_history_${currentMode}`, JSON.stringify(history));
     }
 
     function clearCurrentChat() {
-      if (confirm(`क्या आप ${currentMode.toUpperCase()} मोड की पूरी मेमोरी मिटाना चाहते हैं?`)) {
+      if (confirm(`क्या आप ${currentMode.toUpperCase()} मोड की मेमोरी रीसेट करना चाहते हैं?`)) {
         localStorage.removeItem(`chat_history_${currentMode}`);
         loadChatHistory();
       }
@@ -177,13 +179,13 @@
       loadChatHistory();
     }
 
-    function appendMessage(text, sender, persist = true) {
+    function appendMessage(text, sender, persist = true, isError = false) {
       const msg = document.createElement('div');
-      msg.className = `msg ${sender}`;
+      msg.className = `msg ${sender}` + (isError ? ' error' : '');
       msg.textContent = text;
       chatContainer.appendChild(msg);
       chatContainer.scrollTop = chatContainer.scrollHeight;
-      if (persist) saveMessageToVault(text, sender);
+      if (persist && !isError) saveMessageToVault(text, sender);
       return msg;
     }
 
@@ -214,6 +216,7 @@
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
+        let hasError = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -231,6 +234,7 @@
                 if (parsed.error) {
                   aiMsgElement.className = 'msg ai error';
                   aiMsgElement.textContent = parsed.error;
+                  hasError = true;
                   break;
                 }
                 if (parsed.text) {
@@ -242,7 +246,9 @@
             }
           }
         }
-        if (fullText) saveMessageToVault(fullText, 'ai');
+        if (fullText && !hasError) {
+          saveMessageToVault(fullText, 'ai');
+        }
       } catch (err) {
         aiMsgElement.className = 'msg ai error';
         aiMsgElement.textContent = 'Network error: ' + err.message;
