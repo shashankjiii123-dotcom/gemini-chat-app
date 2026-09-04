@@ -17,38 +17,35 @@ if (fs.existsSync(publicDir)) {
 }
 app.use(express.static(__dirname));
 
+// Knowledge Profiles for Modes
+const SYSTEM_PROMPTS = {
+  general: "You are a helpful, brilliant, and proactive Personal AI assistant.",
+  pcs: "You are an elite PCS/Civil Services Mentor. You specialize in syllabus tracking, GS papers, state-specific static GK, answer-writing frameworks, and strict factual precision. Guide step-by-step.",
+  freelance: "You are a senior full-stack software engineer and freelance architect. Focus on clean code, production architecture, Node.js, Flutter, APIs, debugging, and client deliverable standards.",
+  life: "You are a high-performance life coach and discipline strategist. You focus on daily routines, active recall, physical fitness, deep work blocks, and extreme mental clarity. Give direct, actionable feedback."
+};
+
 app.get('/', (req, res) => {
   const fileInPublic = path.join(__dirname, 'public', 'index.html');
-  if (fs.existsSync(fileInPublic)) {
-    return res.sendFile(fileInPublic);
-  }
+  if (fs.existsSync(fileInPublic)) return res.sendFile(fileInPublic);
   const fileInRoot = path.join(__dirname, 'index.html');
-  if (fs.existsSync(fileInRoot)) {
-    return res.sendFile(fileInRoot);
-  }
-  res.send('<h2>Server running</h2>');
+  if (fs.existsSync(fileInRoot)) return res.sendFile(fileInRoot);
+  res.send('<h2>App is running</h2>');
 });
 
 app.post('/api/chat', async (req, res) => {
-  const { message } = req.body;
+  const { message, mode } = req.body;
   if (!message) return res.status(400).json({ error: 'Message is required' });
 
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
-  if (!apiKey) {
-    return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
-  }
+  if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY is not configured' });
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  // अगर मुख्य मॉडल बिजी (503) हो, तो यह बारी-बारी से अगले मॉडल्स पर स्विच करेगा
-  const candidateModels = [
-    'gemini-3.6-flash',
-    'gemini-2.5-flash',
-    'gemini-1.5-pro'
-  ];
-
+  const systemInstruction = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.general;
+  const candidateModels = ['gemini-3.6-flash', 'gemini-2.5-flash'];
   let success = false;
   let lastErrorMessage = '';
 
@@ -59,6 +56,9 @@ app.post('/api/chat', async (req, res) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: systemInstruction }]
+          },
           contents: [{ parts: [{ text: message }] }]
         })
       });
@@ -74,20 +74,18 @@ app.post('/api/chat', async (req, res) => {
         break;
       } else {
         lastErrorMessage = data.error?.message || response.statusText;
-        console.warn(`Model ${model} failed (${response.status}): ${lastErrorMessage}, trying next model...`);
       }
     } catch (err) {
       lastErrorMessage = err.message;
-      console.warn(`Fetch to ${model} threw error: ${err.message}`);
     }
   }
 
   if (!success) {
-    res.write(`data: ${JSON.stringify({ error: `Traffic high on Google servers: ${lastErrorMessage}. Please retry in a moment.` })}\n\n`);
+    res.write(`data: ${JSON.stringify({ error: `Orchestrator error: ${lastErrorMessage}` })}\n\n`);
     res.end();
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`AI Orchestrator running on port ${port}`);
 });
