@@ -40,29 +40,16 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  const modelsToTry = ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-pro'];
-  let streamResult = null;
-  let lastError = null;
-
-  for (const modelName of modelsToTry) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      streamResult = await model.generateContentStream(message);
-      if (streamResult) break;
-    } catch (err) {
-      lastError = err;
-      console.warn(`Model ${modelName} failed, trying next...`);
-    }
-  }
-
-  if (!streamResult) {
-    console.error('All models failed:', lastError);
-    res.write(`data: ${JSON.stringify({ error: lastError?.message || 'Failed to connect to any Gemini model' })}\n\n`);
-    return res.end();
-  }
-
   try {
-    for await (const chunk of streamResult.stream) {
+    // apiVersion स्पष्ट रूप से v1 सेट करने से 404 Not Found हल हो जाता है
+    const model = genAI.getGenerativeModel(
+      { model: 'gemini-1.5-flash' },
+      { apiVersion: 'v1' }
+    );
+    
+    const result = await model.generateContentStream(message);
+
+    for await (const chunk of result.stream) {
       const chunkText = chunk.text();
       if (chunkText) {
         res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
@@ -71,8 +58,8 @@ app.post('/api/chat', async (req, res) => {
     res.write('data: [DONE]\n\n');
     res.end();
   } catch (err) {
-    console.error('Stream processing error:', err);
-    res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+    console.error('Gemini Error:', err);
+    res.write(`data: ${JSON.stringify({ error: err.message || 'API request failed' })}\n\n`);
     res.end();
   }
 });
