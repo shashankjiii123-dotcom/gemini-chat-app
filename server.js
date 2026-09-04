@@ -18,10 +18,10 @@ if (fs.existsSync(publicDir)) {
 app.use(express.static(__dirname));
 
 const SYSTEM_PROMPTS = {
-  general: "You are a helpful, brilliant, and proactive Personal AI assistant. You remember all details shared earlier in the conversation.",
-  pcs: "You are an elite PCS/Civil Services Mentor. You track syllabus, GS papers, state-specific static GK, and student progress across sessions. Remember every topic previously discussed.",
-  freelance: "You are a senior full-stack software engineer and freelance architect. Maintain persistent awareness of all project architectures, bug reports, and codebases discussed.",
-  life: "You are a high-performance life coach and discipline strategist. Remember every personal goal, daily habit, time-block, and reflection shared by the user."
+  general: "You are a helpful, brilliant, and proactive Personal AI assistant. Always remember previous conversation details accurately.",
+  pcs: "You are an elite PCS/Civil Services Mentor. You specialize in syllabus tracking, GS papers, state-specific static GK, and structured answer writing.",
+  freelance: "You are a senior full-stack software engineer and freelance architect. Focus on high-quality production code, architecture, and debugging.",
+  life: "You are a high-performance life coach and discipline strategist. Guide daily habits, routine blocks, and personal goals directly."
 };
 
 app.get('/', (req, res) => {
@@ -44,26 +44,28 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   const systemInstruction = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.general;
-  const candidateModels = ['gemini-3.6-flash', 'gemini-2.5-flash'];
 
-  // Google Gemini के लिए पूरी हिस्ट्री को सही स्ट्रक्चर में तैयार करना
+  // केवल वैलिड हिस्ट्री को फ़िल्टर करें (एरर टेक्स्ट को बाहर रखें)
   let formattedContents = [];
-  if (Array.isArray(history) && history.length > 0) {
-    formattedContents = history.map(item => ({
-      role: item.sender === 'user' ? 'user' : 'model',
-      parts: [{ text: item.text }]
-    }));
+  if (Array.isArray(history)) {
+    formattedContents = history
+      .filter(item => item && item.text && !item.text.startsWith('Memory/Orchestrator error') && !item.text.startsWith('Google API Error'))
+      .map(item => ({
+        role: item.sender === 'user' ? 'user' : 'model',
+        parts: [{ text: item.text }]
+      }));
   }
-  // वर्तमान नया मैसेज जोड़ें
+
   formattedContents.push({
     role: 'user',
     parts: [{ text: message }]
   });
 
+  const activeModels = ['gemini-3.6-flash'];
   let success = false;
   let lastErrorMessage = '';
 
-  for (const model of candidateModels) {
+  for (const model of activeModels) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
       const response = await fetch(url, {
@@ -95,11 +97,11 @@ app.post('/api/chat', async (req, res) => {
   }
 
   if (!success) {
-    res.write(`data: ${JSON.stringify({ error: `Memory/Orchestrator error: ${lastErrorMessage}` })}\n\n`);
+    res.write(`data: ${JSON.stringify({ error: `Server busy (${lastErrorMessage}). Please retry in a moment.` })}\n\n`);
     res.end();
   }
 });
 
 app.listen(port, () => {
-  console.log(`AI Orchestrator with Infinite Memory running on port ${port}`);
+  console.log(`AI Orchestrator running on port ${port}`);
 });
