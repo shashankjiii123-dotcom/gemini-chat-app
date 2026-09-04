@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -18,8 +17,6 @@ if (fs.existsSync(publicDir)) {
 }
 app.use(express.static(__dirname));
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-
 app.get('/', (req, res) => {
   const fileInPublic = path.join(__dirname, 'public', 'index.html');
   if (fs.existsSync(fileInPublic)) {
@@ -29,37 +26,57 @@ app.get('/', (req, res) => {
   if (fs.existsSync(fileInRoot)) {
     return res.sendFile(fileInRoot);
   }
-  res.send('<h2>Server is running! Lekin index.html nahi mili.</h2>');
+  res.send('<h2>Server is running! Index file not found.</h2>');
 });
 
 app.post('/api/chat', async (req, res) => {
   const { message } = req.body;
   if (!message) return res.status(400).json({ error: 'Message is required' });
 
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is not configured' });
+  }
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  try {
-    // apiVersion स्पष्ट रूप से v1 सेट करने से 404 Not Found हल हो जाता है
-    const model = genAI.getGenerativeModel(
-      { model: 'gemini-1.5-flash' },
-      { apiVersion: 'v1' }
-    );
-    
-    const result = await model.generateContentStream(message);
+  // gemini-2.0-flash और gemini-1.5-flash दोनों के ऑफिशियल एंडपॉइंट
+  const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+  let successful = false;
 
-    for await (const chunk of result.stream) {
-      const chunkText = chunk.text();
-      if (chunkText) {
-        res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
+  for (const model of models) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: message }] }]
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.warn(`Model ${model} returned error:`, data.error?.message || response.statusText);
+        continue;
       }
+
+      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
+      res.write(`data: ${JSON.stringify({ text: reply })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+      successful = true;
+      break;
+    } catch (err) {
+      console.warn(`Model ${model} fetch failed:`, err.message);
     }
-    res.write('data: [DONE]\n\n');
-    res.end();
-  } catch (err) {
-    console.error('Gemini Error:', err);
-    res.write(`data: ${JSON.stringify({ error: err.message || 'API request failed' })}\n\n`);
+  }
+
+  if (!successful) {
+    res.write(`data: ${JSON.stringify({ error: 'Failed to fetch response from Gemini models.' })}\n\n`);
     res.end();
   }
 });
