@@ -17,12 +17,11 @@ if (fs.existsSync(publicDir)) {
 }
 app.use(express.static(__dirname));
 
-// Knowledge Profiles for Modes
 const SYSTEM_PROMPTS = {
-  general: "You are a helpful, brilliant, and proactive Personal AI assistant.",
-  pcs: "You are an elite PCS/Civil Services Mentor. You specialize in syllabus tracking, GS papers, state-specific static GK, answer-writing frameworks, and strict factual precision. Guide step-by-step.",
-  freelance: "You are a senior full-stack software engineer and freelance architect. Focus on clean code, production architecture, Node.js, Flutter, APIs, debugging, and client deliverable standards.",
-  life: "You are a high-performance life coach and discipline strategist. You focus on daily routines, active recall, physical fitness, deep work blocks, and extreme mental clarity. Give direct, actionable feedback."
+  general: "You are a helpful, brilliant, and proactive Personal AI assistant. You remember all details shared earlier in the conversation.",
+  pcs: "You are an elite PCS/Civil Services Mentor. You track syllabus, GS papers, state-specific static GK, and student progress across sessions. Remember every topic previously discussed.",
+  freelance: "You are a senior full-stack software engineer and freelance architect. Maintain persistent awareness of all project architectures, bug reports, and codebases discussed.",
+  life: "You are a high-performance life coach and discipline strategist. Remember every personal goal, daily habit, time-block, and reflection shared by the user."
 };
 
 app.get('/', (req, res) => {
@@ -34,7 +33,7 @@ app.get('/', (req, res) => {
 });
 
 app.post('/api/chat', async (req, res) => {
-  const { message, mode } = req.body;
+  const { message, mode, history } = req.body;
   if (!message) return res.status(400).json({ error: 'Message is required' });
 
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
@@ -46,6 +45,21 @@ app.post('/api/chat', async (req, res) => {
 
   const systemInstruction = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.general;
   const candidateModels = ['gemini-3.6-flash', 'gemini-2.5-flash'];
+
+  // Google Gemini के लिए पूरी हिस्ट्री को सही स्ट्रक्चर में तैयार करना
+  let formattedContents = [];
+  if (Array.isArray(history) && history.length > 0) {
+    formattedContents = history.map(item => ({
+      role: item.sender === 'user' ? 'user' : 'model',
+      parts: [{ text: item.text }]
+    }));
+  }
+  // वर्तमान नया मैसेज जोड़ें
+  formattedContents.push({
+    role: 'user',
+    parts: [{ text: message }]
+  });
+
   let success = false;
   let lastErrorMessage = '';
 
@@ -59,7 +73,7 @@ app.post('/api/chat', async (req, res) => {
           systemInstruction: {
             parts: [{ text: systemInstruction }]
           },
-          contents: [{ parts: [{ text: message }] }]
+          contents: formattedContents
         })
       });
 
@@ -81,11 +95,11 @@ app.post('/api/chat', async (req, res) => {
   }
 
   if (!success) {
-    res.write(`data: ${JSON.stringify({ error: `Orchestrator error: ${lastErrorMessage}` })}\n\n`);
+    res.write(`data: ${JSON.stringify({ error: `Memory/Orchestrator error: ${lastErrorMessage}` })}\n\n`);
     res.end();
   }
 });
 
 app.listen(port, () => {
-  console.log(`AI Orchestrator running on port ${port}`);
+  console.log(`AI Orchestrator with Infinite Memory running on port ${port}`);
 });
