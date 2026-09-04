@@ -17,11 +17,19 @@ if (fs.existsSync(publicDir)) {
 }
 app.use(express.static(__dirname));
 
+// परमानेंट कोर मेमोरी: चैट क्लियर करने पर भी यह कभी नहीं भूलेगा
+const CORE_USER_CONTEXT = `
+User Profile & Ground Truth:
+- Name: Shashank Chaudhary (शशांक)
+- Primary Aspirations: PCS/Civil Services exam preparation, full-stack application development & freelancing, and extreme personal discipline & routine.
+- Rule: Always recognize Shashank as the master/creator of this OS. Never ask who he is or forget his name. Speak naturally, respectfully, and proactively.
+`;
+
 const SYSTEM_PROMPTS = {
-  general: "You are a helpful, brilliant, and proactive Personal AI assistant. Always remember previous conversation details accurately.",
-  pcs: "You are an elite PCS/Civil Services Mentor. You specialize in syllabus tracking, GS papers, state-specific static GK, and structured answer writing.",
-  freelance: "You are a senior full-stack software engineer and freelance architect. Focus on high-quality production code, architecture, and debugging.",
-  life: "You are a high-performance life coach and discipline strategist. Guide daily habits, routine blocks, and personal goals directly."
+  general: `${CORE_USER_CONTEXT}\nRole: You are Shashank's Personal AI OS companion. You are sharp, proactive, and assist him across all daily tasks.`,
+  pcs: `${CORE_USER_CONTEXT}\nRole: You are Shashank's elite PCS/Civil Services Mentor. Specialize in GS syllabus, static GK, answer writing frameworks, and exam strategy.`,
+  freelance: `${CORE_USER_CONTEXT}\nRole: You are Shashank's senior freelance engineering partner. Assist in Flutter, Node.js, code architecture, and client deliverables.`,
+  life: `${CORE_USER_CONTEXT}\nRole: You are Shashank's discipline coach. Monitor daily habits, morning physical routines, deep work study blocks, and mental clarity.`
 };
 
 app.get('/', (req, res) => {
@@ -47,7 +55,6 @@ app.post('/api/chat', async (req, res) => {
 
   const systemInstruction = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.general;
 
-  // केवल यूज़र और मॉडल के सही मैसेज भेजें (एरर्स को फिल्टर करें)
   let formattedContents = [];
   if (Array.isArray(history)) {
     formattedContents = history
@@ -63,7 +70,6 @@ app.post('/api/chat', async (req, res) => {
     parts: [{ text: message }]
   });
 
-  // बैकअप मॉडल्स का पूल: पहला बिजी होगा तो दूसरा तुरंत पिक करेगा
   const candidateModels = [
     'gemini-3.6-flash',
     'gemini-2.0-flash-lite',
@@ -75,7 +81,6 @@ app.post('/api/chat', async (req, res) => {
   let lastErrorMessage = '';
 
   for (const model of candidateModels) {
-    // हर मॉडल को 2 बार मौका देंगे (लोड स्पाइक 1 सेकंड का होता है)
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -101,12 +106,11 @@ app.post('/api/chat', async (req, res) => {
           break;
         } else {
           lastErrorMessage = data.error?.message || response.statusText;
-          // अगर 503 (हाई डिमांड) है, तो 700ms रुककर दोबारा कोशिश करें
           if (response.status === 503 || response.status === 429) {
             await sleep(700);
             continue;
           }
-          break; // किसी अन्य एरर (जैसे 404) पर अगले मॉडल पर जाएँ
+          break;
         }
       } catch (err) {
         lastErrorMessage = err.message;
@@ -117,11 +121,11 @@ app.post('/api/chat', async (req, res) => {
   }
 
   if (!success) {
-    res.write(`data: ${JSON.stringify({ error: `Server busy (${lastErrorMessage}). Please tap send again.` })}\n\n`);
+    res.write(`data: ${JSON.stringify({ error: `Server busy (${lastErrorMessage}). Please retry.` })}\n\n`);
     res.end();
   }
 });
 
 app.listen(port, () => {
-  console.log(`AI Orchestrator running on port ${port}`);
+  console.log(`AI Orchestrator with Permanent Core Memory running on port ${port}`);
 });
