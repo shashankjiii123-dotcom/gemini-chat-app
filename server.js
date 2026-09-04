@@ -35,38 +35,55 @@ app.post('/api/chat', async (req, res) => {
 
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey) {
-    return res.status(500).json({ error: 'GEMINI_API_KEY variable nahi mila' });
+    return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  try {
-    // Google के नए निर्देश के अनुसार gemini-3.6-flash सेट किया गया है
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: message }] }]
-      })
-    });
+  // अगर मुख्य मॉडल बिजी (503) हो, तो यह बारी-बारी से अगले मॉडल्स पर स्विच करेगा
+  const candidateModels = [
+    'gemini-3.6-flash',
+    'gemini-2.5-flash',
+    'gemini-1.5-pro'
+  ];
 
-    const data = await response.json();
+  let success = false;
+  let lastErrorMessage = '';
 
-    if (!response.ok) {
-      const errorMsg = data.error?.message || response.statusText;
-      res.write(`data: ${JSON.stringify({ error: `Google API Error (${response.status}): ${errorMsg}` })}\n\n`);
-      return res.end();
+  for (const model of candidateModels) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: message }] }]
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
+        res.write(`data: ${JSON.stringify({ text: reply })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        success = true;
+        break;
+      } else {
+        lastErrorMessage = data.error?.message || response.statusText;
+        console.warn(`Model ${model} failed (${response.status}): ${lastErrorMessage}, trying next model...`);
+      }
+    } catch (err) {
+      lastErrorMessage = err.message;
+      console.warn(`Fetch to ${model} threw error: ${err.message}`);
     }
+  }
 
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
-    res.write(`data: ${JSON.stringify({ text: reply })}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
-  } catch (err) {
-    res.write(`data: ${JSON.stringify({ error: `Network/Server Error: ${err.message}` })}\n\n`);
+  if (!success) {
+    res.write(`data: ${JSON.stringify({ error: `Traffic high on Google servers: ${lastErrorMessage}. Please retry in a moment.` })}\n\n`);
     res.end();
   }
 });
